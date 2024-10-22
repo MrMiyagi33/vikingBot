@@ -27,7 +27,7 @@ async def on_presence_update(before, after):
                     await voice_channel.connect()
                     voice = discord.utils.get(client.voice_clients, guild=after.guild)
                 if not voice.is_playing():
-                    voice.play(discord.FFmpegOpusAudio.from_probe(url))
+                    voice.play(await discord.FFmpegOpusAudio.from_probe(url))
 @client.event
 async def on_voice_state_update(member, before, after):
     voice_state = member.guild.voice_client
