@@ -4,7 +4,7 @@ from discord.ext import commands
 intents = discord.Intents.all()
 
 tokens = []
-with open('config2.txt') as file:
+with open('config.txt') as file:
     for line in file:
         line = line.strip()
         if line:
