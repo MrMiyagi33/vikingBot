@@ -11,4 +11,4 @@ sed -i "s/BOT_TOKEN_HERE/$botCode/g" config.txt
 sed -i "s/URL/$url/g" config.txt
 sed -i "s/PREFIX/$prefix/g" config.txt
 
-py viking.py
+python3 viking.py
