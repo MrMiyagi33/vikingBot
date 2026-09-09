@@ -15,7 +15,7 @@ with open('config.txt') as file:
             tokens.append(items[1])
 
 bot_token = tokens[0]
-url = tokens[1]
+default_url = tokens[1]
 prefix = tokens[2]
 
 ffmpeg_path = 'ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
@@ -23,7 +23,27 @@ ffmpeg_path = 'ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
 client = commands.Bot(command_prefix=prefix, intents=intents)
 voice_lock = asyncio.Lock()
 
-async def play_audio_in_channel(guild, voice_channel):
+def after_playing(error, guild):
+    if error:
+        print(f"Player error: {error}")
+    
+    coro = disconnect_if_idle(guild)
+    fut = asyncio.run_coroutine_threadsafe(coro, client.loop)
+    try:
+        fut.result()
+    except Exception as e:
+        print(f"Error during post-playback cleanup: {e}")
+
+async def disconnect_if_idle(guild):
+    async with voice_lock:
+        voice = guild.voice_client
+        if voice and voice.is_connected() and not voice.is_playing():
+            await voice.disconnect()
+
+async def play_audio_in_channel(guild, voice_channel, audio_url=None):
+    # Fall back to default config URL if no custom URL was provided
+    target_url = audio_url if audio_url else default_url
+
     async with voice_lock:
         voice = guild.voice_client
 
@@ -36,41 +56,46 @@ async def play_audio_in_channel(guild, voice_channel):
         elif voice.channel != voice_channel:
             await voice.move_to(voice_channel)
 
-        if voice and not voice.is_playing():
+        if voice:
+            # If currently playing something else, stop it first to play the new link
+            if voice.is_playing():
+                voice.stop()
+
             try:
-                source = discord.FFmpegPCMAudio(url, executable=ffmpeg_path)
+                source = discord.FFmpegPCMAudio(target_url, executable=ffmpeg_path)
                 audio = discord.PCMVolumeTransformer(source)
-                voice.play(audio)
+                voice.play(audio, after=lambda e: after_playing(e, guild))
                 return True
             except Exception as e:
-                print(f"Error playing audio stream: {e}")
+                print(f"Error playing audio stream from {target_url}: {e}")
                 return False
-        return True
+        return False
 
 @client.event
 async def on_ready():
     print(f"Logged in as {client.user.name}")
 
-# REQUIRED: Ensures prefix commands like >play get processed
 @client.event
 async def on_message(message):
     if message.author.bot:
         return
     await client.process_commands(message)
 
+# >play [optional_link]
 @client.command(name='play')
-async def play_command(ctx):
+async def play_command(ctx, custom_url: str = None):
     if ctx.author.voice is None or ctx.author.voice.channel is None:
         await ctx.send("You need to be in a voice channel to use this command!")
         return
 
     voice_channel = ctx.author.voice.channel
-    success = await play_audio_in_channel(ctx.guild, voice_channel)
+    success = await play_audio_in_channel(ctx.guild, voice_channel, audio_url=custom_url)
     
     if success:
-        await ctx.send(f"Playing audio in **{voice_channel.name}**!")
+        played_target = custom_url if custom_url else "default track"
+        await ctx.send(f"Playing **{played_target}** in **{voice_channel.name}**!")
     else:
-        await ctx.send("Failed to join or play audio.")
+        await ctx.send("Failed to join channel or stream audio.")
 
 @client.command(name='stop')
 async def stop_command(ctx):
@@ -100,7 +125,6 @@ async def on_presence_update(before, after):
 async def on_voice_state_update(member, before, after):
     async with voice_lock:
         voice_state = member.guild.voice_client
-        
         if voice_state is not None and voice_state.is_connected():
             if len(voice_state.channel.members) == 1:
                 if voice_state.is_playing():
