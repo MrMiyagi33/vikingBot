@@ -2,8 +2,6 @@ FROM gorialis/discord.py
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-VOLUME [ "/vikingbot" ]
-
 WORKDIR /vikingbot
 
 ENV BOTCODE=''
@@ -15,7 +13,11 @@ RUN apt-get update && apt-get install -y \
     vim \
     ffmpeg \
     python3 \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install/ensure PyNaCl for voice encryption inside Linux
+RUN pip install --no-cache-dir --upgrade "discord.py[voice]" PyNaCl
 
 RUN wget https://raw.githubusercontent.com/MrMiyagi33/vikingBot/refs/heads/main/viking.py \
     && wget https://raw.githubusercontent.com/MrMiyagi33/vikingBot/refs/heads/main/config.txt \
