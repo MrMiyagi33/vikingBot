@@ -1,14 +1,20 @@
 #!/bin/bash
 
 botCode="$1"
-echo "bot code: "$botCode
 url="$2"
-echo "url: "$url
 prefix="$3"
-echo "prefix: "$prefix
 
-sed -i "s/BOT_TOKEN_HERE/$botCode/g" config.txt
-sed -i "s,URL_PATH,$url,g" config.txt
-sed -i "s/PREFIX/$prefix/g" config.txt
+echo "Configuring bot settings..."
 
-python3 viking.py
+# Prepare config.txt from downloaded base template
+cp config.txt config_working.txt
+
+sed -i "s/BOT_TOKEN_HERE/$botCode/g" config_working.txt
+sed -i "s,URL_PATH,$url,g" config_working.txt
+sed -i "s/PREFIX/$prefix/g" config_working.txt
+
+# Overwrite config.txt so viking.py can read it
+mv config_working.txt config.txt
+
+echo "Starting Viking Bot..."
+exec python3 viking.py
