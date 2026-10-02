@@ -268,6 +268,31 @@ async def skip_command(ctx):
     await ctx.send(f"Skipped **{track.title}**." if track else "Skipped.")
 
 
+@client.command(name='pause')
+async def pause_command(ctx):
+    voice = ctx.guild.voice_client
+    if voice is not None and voice.is_paused():
+        await ctx.send(f"Already paused. Use `{prefix}resume` to keep listening.")
+        return
+    if voice is None or not voice.is_playing():
+        await ctx.send("Nothing is playing.")
+        return
+    voice.pause()
+    track = now_playing.get(ctx.guild.id)
+    await ctx.send(f"Paused **{track.title}**." if track else "Paused.")
+
+
+@client.command(name='resume')
+async def resume_command(ctx):
+    voice = ctx.guild.voice_client
+    if voice is None or not voice.is_paused():
+        await ctx.send("Nothing is paused.")
+        return
+    voice.resume()
+    track = now_playing.get(ctx.guild.id)
+    await ctx.send(f"Resumed **{track.title}**." if track else "Resumed.")
+
+
 @client.command(name='queue')
 async def queue_command(ctx):
     track = now_playing.get(ctx.guild.id)
@@ -278,7 +303,9 @@ async def queue_command(ctx):
 
     lines = []
     if track:
-        lines.append(f"Now playing: **{track.title}**{format_duration(track.duration)}")
+        voice = ctx.guild.voice_client
+        label = "Paused" if voice is not None and voice.is_paused() else "Now playing"
+        lines.append(f"{label}: **{track.title}**{format_duration(track.duration)}")
     for i, queued in enumerate(list(queue)[:10], start=1):
         lines.append(f"{i}. {queued.title}{format_duration(queued.duration)}")
     if len(queue) > 10:
