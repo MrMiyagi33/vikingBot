@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade "discord.py[voice]" PyNaCl
+# yt-dlp turns YouTube links and searches into audio streams; the deno extra is the
+# JavaScript runtime yt-dlp needs for YouTube. --upgrade matters: old yt-dlp versions stop working.
+RUN pip install --no-cache-dir --upgrade "discord.py[voice]" PyNaCl "yt-dlp[default,deno]"
 
 RUN wget https://raw.githubusercontent.com/MrMiyagi33/vikingBot/refs/heads/main/viking.py \
     && wget https://raw.githubusercontent.com/MrMiyagi33/vikingBot/refs/heads/main/config.txt \
