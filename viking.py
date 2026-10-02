@@ -3,7 +3,7 @@ import collections
 import platform
 from dataclasses import dataclass, replace
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import discord
 import yt_dlp
@@ -25,6 +25,7 @@ default_url = tokens[1]
 prefix = tokens[2]
 
 ffmpeg_path = 'ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+ffprobe_path = 'ffprobe.exe' if platform.system() == 'Windows' else 'ffprobe'
 
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
@@ -64,6 +65,20 @@ now_playing = {}
 
 def is_link(text):
     return text.startswith(('http://', 'https://'))
+
+
+def file_title(url):
+    """The file name from an audio link, e.g. '.../Brothers%2520in%2520Valheim.mp3' -> 'Brothers in Valheim.mp3'."""
+    name = urlparse(url).path.rsplit('/', 1)[-1]
+    # Some links are encoded twice (%2520), so decode until nothing changes
+    while unquote(name) != name:
+        name = unquote(name)
+    return name or url
+
+
+def default_track(channel=None):
+    title = "default track" if is_youtube_link(default_url) else file_title(default_url)
+    return Track(title=title, url=default_url, is_youtube=is_youtube_link(default_url), channel=channel)
 
 
 def is_youtube_link(url):
@@ -131,7 +146,7 @@ async def ytdl_extract(query):
 async def make_track(query, channel=None):
     """Turns a link or search words into a Track, or None if nothing was found."""
     if is_link(query) and not is_youtube_link(query):
-        return Track(title=query, url=query, is_youtube=False, channel=channel)
+        return Track(title=file_title(query), url=query, is_youtube=False, channel=channel)
 
     search = query if is_link(query) else f"ytsearch1:{query}"
     try:
@@ -149,6 +164,36 @@ async def make_track(query, channel=None):
         duration=info.get('duration'),
         channel=channel,
     )
+
+
+async def probe_duration(url):
+    """Asks ffprobe how long an audio file is, in seconds, or None if it can't tell."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            ffprobe_path, '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', url,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        return float(out.decode().strip())
+    except Exception as e:
+        print(f"Could not get the length of {url}: {e}")
+        return None
+
+
+async def fill_in_details(track):
+    """Looks up the length (and, for YouTube, the title) of a track that doesn't have them yet."""
+    if track.duration:
+        return
+    if not track.is_youtube:
+        track.duration = await probe_duration(track.url)
+        return
+    try:
+        info = await ytdl_extract(track.url)
+    except Exception as e:
+        print(f"Could not look up {track.url}: {e}")
+        return
+    if info:
+        track.title = info.get('title') or track.title
+        track.duration = info.get('duration')
 
 
 async def stream_url_for(track):
@@ -286,8 +331,7 @@ async def play_command(ctx, *, query: str = None):
             await ctx.send(f"Couldn't find anything for **{query}**.")
             return
     else:
-        track = Track(title="default track", url=default_url, is_youtube=is_youtube_link(default_url),
-                      channel=ctx.channel)
+        track = default_track(channel=ctx.channel)
 
     position = await enqueue(ctx.guild, voice_channel, track)
     if position is None:
@@ -365,6 +409,26 @@ async def seek_command(ctx, *, when: str = ''):
         voice.stop()
 
 
+# >nowplaying (or >np) shows the song, how far into it we are and how long is left
+@client.command(name='nowplaying', aliases=['np'])
+async def nowplaying_command(ctx):
+    voice = ctx.guild.voice_client
+    track = now_playing.get(ctx.guild.id)
+    if voice is None or track is None or not isinstance(voice.source, TrackedAudio):
+        await ctx.send("Nothing is playing.")
+        return
+
+    await fill_in_details(track)
+    position = voice.source.position
+    paused = " (paused)" if voice.is_paused() else ""
+    if track.duration:
+        left = max(0, track.duration - position)
+        await ctx.send(f"**{track.title}**{paused}\n{format_time(position)} / {format_time(track.duration)}"
+                       f" ({format_time(left)} left)")
+    else:
+        await ctx.send(f"**{track.title}**{paused}\n{format_time(position)} (length unknown)")
+
+
 @client.command(name='queue')
 async def queue_command(ctx):
     track = now_playing.get(ctx.guild.id)
@@ -413,7 +477,7 @@ async def on_presence_update(before, after):
         # Don't interrupt or pile onto music people queued up
         if is_busy(after.guild):
             return
-        track = Track(title="default track", url=default_url, is_youtube=is_youtube_link(default_url))
+        track = default_track()
         await enqueue(after.guild, after.voice.channel, track)
 
 
