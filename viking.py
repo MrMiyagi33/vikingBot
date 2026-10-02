@@ -1,7 +1,7 @@
 import asyncio
 import collections
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -53,6 +53,7 @@ class Track:
     is_youtube: bool
     duration: Optional[int] = None               # seconds
     channel: Optional[discord.abc.Messageable] = None  # where to announce it, if anywhere
+    start: Optional[float] = None                # seconds in to start from, when seeking
 
 
 # guild id -> tracks waiting to play
@@ -70,14 +71,46 @@ def is_youtube_link(url):
     return any(host == h or host.endswith('.' + h) for h in YOUTUBE_HOSTS)
 
 
-def format_duration(seconds):
-    if not seconds:
-        return ''
+def format_time(seconds):
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
-        return f" ({hours}:{minutes:02}:{seconds:02})"
-    return f" ({minutes}:{seconds:02})"
+        return f"{hours}:{minutes:02}:{seconds:02}"
+    return f"{minutes}:{seconds:02}"
+
+
+def format_duration(seconds):
+    return f" ({format_time(seconds)})" if seconds else ''
+
+
+def parse_time(text):
+    """'90', '1:30' or '1:02:03' -> seconds, or None if it isn't a time."""
+    parts = text.split(':')
+    if len(parts) > 3 or not all(part.isdigit() for part in parts):
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return seconds
+
+
+class TrackedAudio(discord.PCMVolumeTransformer):
+    """Counts the audio handed to Discord, so we know how far into the track we are."""
+
+    def __init__(self, original, start=0):
+        super().__init__(original)
+        self.start = start
+        self.frames = 0
+
+    def read(self):
+        data = super().read()
+        if data:
+            self.frames += 1
+        return data
+
+    @property
+    def position(self):
+        return self.start + self.frames * discord.opus.Encoder.FRAME_LENGTH / 1000
 
 
 def _ytdl_extract(query):
@@ -169,13 +202,20 @@ async def play_next(guild):
             now_playing[guild.id] = track
             try:
                 stream_url = await stream_url_for(track)
-                source = discord.FFmpegPCMAudio(stream_url, executable=ffmpeg_path, **FFMPEG_OPTIONS)
-                voice.play(discord.PCMVolumeTransformer(source), after=lambda e: after_playing(e, guild))
+                before_options = FFMPEG_OPTIONS['before_options']
+                if track.start:
+                    before_options = f"-ss {track.start:.2f} {before_options}"
+                source = discord.FFmpegPCMAudio(stream_url, executable=ffmpeg_path,
+                                                before_options=before_options, options=FFMPEG_OPTIONS['options'])
+                voice.play(TrackedAudio(source, start=track.start or 0), after=lambda e: after_playing(e, guild))
             except Exception as e:
                 print(f"Error playing {track.url}: {e}")
                 await send(track.channel, f"Couldn't play **{track.title}**, skipping it.")
                 continue
-            await send(track.channel, f"Now playing **{track.title}**{format_duration(track.duration)}")
+            if track.start is not None:
+                await send(track.channel, f"Jumped to {format_time(track.start)} in **{track.title}**")
+            else:
+                await send(track.channel, f"Now playing **{track.title}**{format_duration(track.duration)}")
             return
 
         now_playing.pop(guild.id, None)
@@ -291,6 +331,38 @@ async def resume_command(ctx):
     voice.resume()
     track = now_playing.get(ctx.guild.id)
     await ctx.send(f"Resumed **{track.title}**." if track else "Resumed.")
+
+
+# >seek 1:30 jumps to 1:30, >seek +30 / >seek -30 jumps 30 seconds forward / back
+@client.command(name='seek')
+async def seek_command(ctx, *, when: str = ''):
+    when = when.strip()
+    sign = when[0] if when.startswith(('+', '-')) else ''
+    seconds = parse_time(when[len(sign):].strip())
+    if seconds is None:
+        await ctx.send(f"Use `{prefix}seek 1:30` to jump to a time, or `{prefix}seek +30` / `{prefix}seek -30` "
+                       f"to jump forward or back that many seconds.")
+        return
+
+    async with voice_lock:
+        voice = ctx.guild.voice_client
+        track = now_playing.get(ctx.guild.id)
+        if (voice is None or track is None or not isinstance(voice.source, TrackedAudio)
+                or not (voice.is_playing() or voice.is_paused())):
+            await ctx.send("Nothing is playing.")
+            return
+
+        position = voice.source.position
+        target = position + seconds if sign == '+' else position - seconds if sign == '-' else seconds
+        target = max(0, target)
+        if track.duration and target >= track.duration:
+            await ctx.send(f"**{track.title}** is only {format_time(track.duration)} long.")
+            return
+
+        # Restart the track from the new spot: put it back at the front of the queue
+        # and stop, and the after-callback plays it once we let go of the lock
+        queues[ctx.guild.id].appendleft(replace(track, start=target, channel=ctx.channel))
+        voice.stop()
 
 
 @client.command(name='queue')

@@ -8,6 +8,8 @@ It also plays music from YouTube, with a queue:
 - `>play` - queues the default Valheim song
 - `>pause` - pauses the current song
 - `>resume` - carries on playing a paused song
+- `>seek 1:30` - jumps to 1:30 in the current song
+- `>seek +30` / `>seek -30` - jumps forward / back 30 seconds
 - `>skip` - skips to the next song
 - `>queue` - shows what's playing and what's next
 - `>stop` - clears the queue and leaves the voice channel
