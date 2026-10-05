@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import os
 import platform
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -23,6 +24,10 @@ with open('config.txt') as file:
 bot_token = tokens[0]
 default_url = tokens[1]
 prefix = tokens[2]
+
+# DISABLE_VALHEIM_SONG=true stops the Valheim song playing, both when someone starts
+# Valheim and when >play is used with nothing after it
+valheim_song_disabled = os.environ.get('DISABLE_VALHEIM_SONG', '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 ffmpeg_path = 'ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
 ffprobe_path = 'ffprobe.exe' if platform.system() == 'Windows' else 'ffprobe'
@@ -330,6 +335,9 @@ async def play_command(ctx, *, query: str = None):
         if track is None:
             await ctx.send(f"Couldn't find anything for **{query}**.")
             return
+    elif valheim_song_disabled:
+        await ctx.send(f"The Valheim song is turned off. Use `{prefix}play <YouTube link or search words>` to play something.")
+        return
     else:
         track = default_track(channel=ctx.channel)
 
@@ -465,6 +473,8 @@ async def stop_command(ctx):
 
 @client.event
 async def on_presence_update(before, after):
+    if valheim_song_disabled:
+        return
     if str(before.activity) == str(after.activity):
         return
 
