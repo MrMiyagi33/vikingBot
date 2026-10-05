@@ -18,3 +18,16 @@ It also plays music from YouTube, with a queue:
 Starting Valheim only plays the theme when the bot isn't already playing something.
 
 YouTube changes often and old yt-dlp versions stop working, so rebuild the Docker image if songs stop playing.
+
+## Running with Docker Compose / Portainer
+
+In Portainer, add a stack with **Repository** as the build method, point it at this repo, and use `docker-compose.yml` as the compose path. Set these environment variables on the stack:
+
+- `BOTCODE` - your Discord bot token (required)
+- `PREFIX` - command prefix, defaults to `>`
+- `URL` - the default song, defaults to the Valheim theme
+- `DISABLE_VALHEIM_SONG` - set to `true` to stop the Valheim song from playing, both when someone starts Valheim and when `>play` is used with nothing after it. Defaults to `false`
+
+To update, push to the repo and click **Pull and redeploy** on the stack (or turn on GitOps updates in the stack settings so Portainer redeploys by itself). The image is rebuilt from the repo on every deploy.
+
+Without Portainer: `BOTCODE=your-token docker compose up -d --build`.
