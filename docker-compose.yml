@@ -1,0 +1,14 @@
+services:
+  vikingbot:
+    build: .
+    image: vikingbot:latest
+    container_name: vikingbot
+    # Rebuild on every deploy so code changes are picked up
+    pull_policy: build
+    restart: unless-stopped
+    environment:
+      BOTCODE: ${BOTCODE:?Set BOTCODE to your Discord bot token}
+      URL: ${URL:-https://storage.googleapis.com/udio-artifacts-c33fe3ba-3ffe-471f-92c8-5dfef90b3ea3/samples/c7ae67096a47484098b82bfb78f17e5f/2/Brothers%2520in%2520Valheim%2520ext%2520v2.1.1.2.mp3}
+      PREFIX: ${PREFIX:->}
+      # true = never play the Valheim song (on game start or a bare >play)
+      DISABLE_VALHEIM_SONG: ${DISABLE_VALHEIM_SONG:-false}
